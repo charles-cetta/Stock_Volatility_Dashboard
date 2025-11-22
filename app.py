@@ -1,6 +1,9 @@
 import streamlit as st
-
 from utils.data_loader import fetch_process_stock_data
+from models.garch_model import train_garch_model, predict_garch
+import numpy as np
+import matplotlib as plt
+
 
 st.title('Stock Volatility Dashboard')
 
@@ -62,3 +65,49 @@ if st.session_state.get('stock_data_fetched', False):
         with col2:
             st.write("**Test Returns (first 5)**")
             st.dataframe(data['test_returns'].head())
+
+
+    #Model Selection
+    st.write("---")
+    st.write("### Select Model")
+
+    if st.button("GARCH Volatility Forecast", use_container_width=True):
+        st.session_state.selected_model = 'GARCH'
+        with st.spinner("Training GARCH Model"):
+            try:
+
+                train_returns_series = data['train_returns'][data['ticker']]
+                garch_model = train_garch_model(data['train_returns'][data['ticker']])
+                garch_predictions = predict_garch(garch_model, data['test_returns'])
+
+                forecast_variance = garch_predictions.variance.values[-1, :()]
+                forecast_volatility = np.sqrt(forecast_variance)
+
+                st.success("GARCH model trained successfully!")
+
+            except Exception as e:
+                st.error(f"Error training GARCH model: {e}")
+
+                st.write("### Model Summary")
+                st.text(garch_model.summary())
+
+                st.write("### Volatility Forecast")
+
+                fig, ax = plt.subplots(figsize=(12, 6))
+
+                historical_vol = data['train_returns'][data['ticker']].rolling(window=20).std()
+                ax.plot(historical_vol.index, historical_vol, label='Historical Volatility (20-day)', alpha=0.7)
+
+                test_dates = data['test_returns'].index[:len(forecast_volatility)]
+                ax.plot(test_dates, forecast_volatility, label='GARCH Forecast', color='red', linewidth=2)
+
+                ax.set_xlabel('Date')
+                ax.set_ylabel('Volatility')
+                ax.set_title(f'GARCH Volatility Forecast for {data["ticker"]}')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+
+                st.pyplot(fig)
+
+    if 'selected_model' in st.session_state:
+        st.write(f"**Currently viewing: {st.session_state.selected_model}**")
