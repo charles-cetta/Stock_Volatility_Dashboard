@@ -1,6 +1,6 @@
 import streamlit as st
 from utils.data_loader import fetch_process_stock_data
-from models.garch_model import train_garch_model, predict_garch
+from models.garch_model import train_garch_model, get_forecast_volatility
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt  # Fixed: was 'matplotlib as plt'
@@ -114,7 +114,7 @@ if st.session_state.get('stock_data_fetched', False):
         axes[0].set_title('Returns Distribution')
         axes[0].legend()
 
-        # Box plot comparison
+        # Box Plots
         axes[1].boxplot([train_rets, test_rets], labels=['Train', 'Test'])
         axes[1].set_ylabel('Daily Returns')
         axes[1].set_title('Returns Spread Comparison')
@@ -150,11 +150,10 @@ if st.session_state.get('stock_data_fetched', False):
         # Expander explaining chronological split
         with st.expander("Why Chronological Split?"):
             st.write("""
-            **Time series data requires chronological splitting, not random splitting.**
+            **Time series data requires chronological splitting.**
 
-            - **Avoids look-ahead bias**: Random splits would leak future information into training
-            - **Mimics real forecasting**: In practice, you only have past data to predict the future
-            - **Preserves temporal dependencies**: Volatility clustering and other patterns stay intact
+            Random splits would leak future information into training.
+            This mimics real forecasting. In practice, you only have past data to predict the future
 
             Our 75/25 split uses approximately 3.75 years for training and 1.25 years for testing.
             """)
@@ -167,33 +166,191 @@ if st.session_state.get('stock_data_fetched', False):
         st.session_state.selected_model = 'GARCH'
         with st.spinner("Training GARCH Model"):
             try:
-                train_returns_series = data['train_returns'][data['ticker']]
-                garch_model = train_garch_model(train_returns_series)
-                garch_predictions = predict_garch(garch_model, data['test_returns'])
+                returns_series = data['returns'][data['ticker']]
 
-                forecast_variance = garch_predictions.variance.values[-1, :]
-                forecast_volatility = np.sqrt(forecast_variance)
+                # Train model with automatic validation and fallback
+                garch_result = train_garch_model(returns_series, data['split_index'])
+                garch_model = garch_result['model']
 
-                st.success("GARCH model trained successfully!")
+                # Get properly scaled forecasts
+                forecast_variance, forecast_volatility = get_forecast_volatility(
+                    garch_result, data['split_index']
+                )
 
-                # Model Summary
-                st.write("### Model Summary")
-                st.text(str(garch_model.summary()))
+                st.success(f"{garch_result['model_type']} trained successfully!")
 
-                # Volatility Forecast Plot
+                # Display any warnings
+                if garch_result['warnings']:
+                    with st.expander("️Model Warnings", expanded=False):
+                        for warning in garch_result['warnings']:
+                            st.warning(warning)
+
+                st.write("### Model Information")
+
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Model Type", garch_result['model_type'].split(' with')[0])
+                col2.metric("Log-Likelihood", f"{garch_model.loglikelihood:.2f}")
+                col3.metric("AIC", f"{garch_model.aic:.2f}")
+                col4.metric("Observations", f"{garch_model.nobs}")
+
+                st.write("### Parameter Estimates")
+
+                params = garch_model.params
+                std_err = garch_model.std_err
+                pvalues = garch_model.pvalues
+
+                # Build parameter table dynamically based on model type
+                param_rows = []
+
+                # Omega (always present)
+                param_rows.append({
+                    'Parameter': 'ω (omega)',
+                    'Description': 'Constant variance term',
+                    'Estimate': f"{params['omega']:.6e}",
+                    'Std Error': f"{std_err['omega']:.2e}",
+                    'P-Value': f"{pvalues['omega']:.4f}" if pvalues['omega'] >= 0.0001 else "<0.0001",
+                    'Significant': "✓" if pvalues['omega'] < 0.05 else ""
+                })
+
+                # Alpha (always present)
+                param_rows.append({
+                    'Parameter': 'α (alpha)',
+                    'Description': 'Shock impact (ARCH term)',
+                    'Estimate': f"{params['alpha[1]']:.4f}",
+                    'Std Error': f"{std_err['alpha[1]']:.4f}",
+                    'P-Value': f"{pvalues['alpha[1]']:.4f}",
+                    'Significant': "✓" if pvalues['alpha[1]'] < 0.05 else ""
+                })
+
+                # Gamma (only for GJR-GARCH)
+                if 'gamma[1]' in params:
+                    param_rows.append({
+                        'Parameter': 'γ (gamma)',
+                        'Description': 'Asymmetric/leverage effect',
+                        'Estimate': f"{params['gamma[1]']:.4f}",
+                        'Std Error': f"{std_err['gamma[1]']:.4f}",
+                        'P-Value': f"{pvalues['gamma[1]']:.4f}" if pvalues['gamma[1]'] >= 0.0001 else "<0.0001",
+                        'Significant': "✓" if pvalues['gamma[1]'] < 0.05 else ""
+                    })
+
+                # Beta (always present)
+                param_rows.append({
+                    'Parameter': 'β (beta)',
+                    'Description': 'Volatility persistence (GARCH term)',
+                    'Estimate': f"{params['beta[1]']:.4f}",
+                    'Std Error': f"{std_err['beta[1]']:.4f}",
+                    'P-Value': f"{pvalues['beta[1]']:.4f}" if pvalues['beta[1]'] >= 0.0001 else "<0.0001",
+                    'Significant': "✓" if pvalues['beta[1]'] < 0.05 else ""
+                })
+
+                # Nu (only for t-distribution)
+                if 'nu' in params:
+                    param_rows.append({
+                        'Parameter': 'ν (nu)',
+                        'Description': 'Degrees of freedom (tail thickness)',
+                        'Estimate': f"{params['nu']:.2f}",
+                        'Std Error': f"{std_err['nu']:.2f}",
+                        'P-Value': f"{pvalues['nu']:.4f}" if pvalues['nu'] >= 0.0001 else "<0.0001",
+                        'Significant': "✓" if pvalues['nu'] < 0.05 else ""
+                    })
+
+                param_df = pd.DataFrame(param_rows)
+                st.dataframe(param_df, use_container_width=True, hide_index=True)
+
+                st.write("### Model Interpretation")
+
+                # Calculate persistence
+                if 'gamma[1]' in params:
+                    persistence = params['alpha[1]'] + params['gamma[1]'] / 2 + params['beta[1]']
+                else:
+                    persistence = params['alpha[1]'] + params['beta[1]']
+
+                # Dynamic columns based on model type
+                if 'gamma[1]' in params and 'nu' in params:
+                    col1, col2, col3 = st.columns(3)
+                elif 'gamma[1]' in params or 'nu' in params:
+                    col1, col2 = st.columns(2)
+                else:
+                    col1 = st.columns(1)[0]
+
+                with col1:
+                    st.metric("Persistence", f"{persistence:.4f}")
+                    if persistence > 0.99:
+                        st.caption("Very high: shocks decay very slowly")
+                    elif persistence > 0.95:
+                        st.caption("High persistence: volatility shocks are long-lasting")
+                    else:
+                        st.caption("Moderate persistence: shocks decay reasonably fast")
+
+                if 'gamma[1]' in params:
+                    with col2:
+                        st.metric("Leverage Effect (γ)", f"{params['gamma[1]']:.4f}")
+                        if pvalues['gamma[1]'] < 0.05:
+                            st.caption("✓ Significant: negative returns increase volatility more")
+                        else:
+                            st.caption("Not significant: symmetric volatility response")
+
+                if 'nu' in params:
+                    target_col = col3 if 'gamma[1]' in params else col2
+                    with target_col:
+                        st.metric("Tail Index (ν)", f"{params['nu']:.2f}")
+                        if params['nu'] < 6:
+                            st.caption("Very heavy tails: frequent extreme moves")
+                        elif params['nu'] < 10:
+                            st.caption("Heavy tails: more extremes than normal")
+                        elif params['nu'] < 30:
+                            st.caption("Moderate tails")
+                        else:
+                            st.caption("Near-normal distribution")
+
+                st.write("### Forecast Evaluation")
+
+                # Calculate metrics
+                test_returns = data['test_returns'][data['ticker']].values[:len(forecast_variance)]
+                squared_returns = test_returns ** 2
+                absolute_returns = np.abs(test_returns)
+
+                mae = np.mean(np.abs(forecast_volatility - absolute_returns))
+                mse = np.mean((forecast_variance - squared_returns) ** 2)
+                rmse = np.sqrt(mse)
+
+                # QLIKE
+                mask = (forecast_variance > 0) & (squared_returns > 0)
+                qlike = np.mean(np.log(forecast_variance[mask]) + squared_returns[mask] / forecast_variance[mask])
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric(
+                    "MAE (Volatility)",
+                    f"{mae:.4f}",
+                    help="Mean Absolute Error - average forecast miss in volatility units"
+                )
+                col2.metric(
+                    "RMSE (Variance)",
+                    f"{rmse:.2e}",
+                    help="Root Mean Squared Error in variance units"
+                )
+                col3.metric(
+                    "QLIKE",
+                    f"{qlike:.4f}",
+                    help="Quasi-likelihood loss - standard for variance forecasts (lower is better)"
+                )
+
                 st.write("### Volatility Forecast")
 
                 fig, ax = plt.subplots(figsize=(12, 6))
 
-                historical_vol = data['train_returns'][data['ticker']].rolling(window=20).std()
+                historical_vol = data['returns'][data['ticker']].rolling(window=20).std()
                 ax.plot(historical_vol.index, historical_vol, label='Historical Volatility (20-day)', alpha=0.7)
 
                 test_dates = data['test_returns'].index[:len(forecast_volatility)]
                 ax.plot(test_dates, forecast_volatility, label='GARCH Forecast', color='red', linewidth=2)
 
+                split_date = data['returns'].index[data['split_index']]
+                ax.axvline(x=split_date, color='green', linestyle='--', linewidth=2, label='Train/Test Split')
+
                 ax.set_xlabel('Date')
                 ax.set_ylabel('Volatility')
-                ax.set_title(f'GARCH Volatility Forecast for {data["ticker"]}')
+                ax.set_title(f'{garch_result["model_type"]} Forecast for {data["ticker"]}')
                 ax.legend()
                 ax.grid(True, alpha=0.3)
 

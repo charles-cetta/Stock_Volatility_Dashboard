@@ -52,5 +52,6 @@ def fetch_process_stock_data(ticker):
         'train_prices': train_prices,
         'test_prices': test_prices,
         'train_returns': train_returns,
-        'test_returns': test_returns
+        'test_returns': test_returns,
+        'split_index': train_size
     }
