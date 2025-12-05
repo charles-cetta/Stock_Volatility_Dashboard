@@ -1,6 +1,8 @@
 import streamlit as st
 from utils.data_loader import fetch_process_stock_data
 from models.garch_model import train_garch_model, get_forecast_volatility
+from models.arima import run_arima_price_forecast
+from models.ols_model import fit_ols_model
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt  # Fixed: was 'matplotlib as plt'
@@ -32,7 +34,7 @@ if st.button("Fetch Data"):
 if st.session_state.get('stock_data_fetched', False):
     data = st.session_state.stock_data
 
-    st.write(f"### Data for {data['ticker']}")
+    st.write(f"### {data['company_name']} ({data['ticker']})")
 
     # Create tabs for different views
     tab1, tab2, tab3, tab4 = st.tabs(["Raw Data", "Prices", "Returns", "Train/Test Split"])
@@ -162,6 +164,288 @@ if st.session_state.get('stock_data_fetched', False):
     st.write("---")
     st.write("### Select Model")
 
+    # OLS Model Button
+    if st.button("OLS Regression Analyse", use_container_width=True):
+        st.session_state.selected_model = 'OLS Regression'
+        with st.spinner("Fitting OLS Model"):
+            try:
+
+                prices_series = pd.Series(index=data['prices'].index, data=data['prices'][data['ticker']])
+
+                ols_result = fit_ols_model(prices_series)
+                ols_model = ols_result['model']
+
+                st.success(f"OLS model fitted successfully!")
+
+                # Display any warnings
+                if ols_result['warnings']:
+                    with st.expander("️Model Warnings", expanded=False):
+                        for warning in ols_result['warnings']:
+                            st.warning(warning)
+
+                st.write("### Model Summary")
+                summary_str = ols_model.summary().as_text()
+                st.code(summary_str, language=None)
+
+                st.write("### Model Coefficients")
+                coef_df = pd.DataFrame({
+                    'Coefficient': ols_model.params,
+                    'Std Error': ols_model.bse,
+                    'P-Value': ols_model.pvalues
+                })
+                st.dataframe(coef_df, use_container_width=True, hide_index=False)
+
+                st.write("### Plot Residuals")
+                residuals = ols_model.resid
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.plot(residuals.index, residuals, label='Residuals', color='purple')
+                ax.axhline(0, color='black', linestyle='--', linewidth=1)
+                ax.set_xlabel('Date')
+                ax.set_ylabel('Residuals')
+                ax.set_title('OLS Model Residuals Over Time')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                st.pyplot(fig)
+                # Plot histogram of residuals and normality
+                st.write("### Residuals Distribution")
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.hist(residuals, bins=50, color='teal', alpha=0.7)
+                # normality line
+                mu = residuals.mean()
+                sigma = residuals.std()
+                xmin, xmax = ax.get_xlim()
+                x = np.linspace(xmin, xmax, 100)
+                p = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+                ax.plot(x, p * len(residuals) * (xmax - xmin) / 50, 'r--', linewidth=2, label='Normal Distribution')
+                ax.legend()
+                ax.set_xlabel('Residuals')
+                ax.set_ylabel('Frequency')
+                ax.set_title('Histogram of OLS Model Residuals')
+                st.pyplot(fig)
+                # Scatter plot of residuals vs fitted values
+                st.write("### Residuals vs Fitted Values")
+                fitted_values = ols_model.fittedvalues
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.scatter(fitted_values, residuals, alpha=0.6, color='orange')
+                ax.axhline(0, color='black', linestyle='--', linewidth=1)
+                ax.set_xlabel('Fitted Values')
+                ax.set_ylabel('Residuals')
+                ax.set_title('Residuals vs Fitted Values')
+                st.pyplot(fig)
+
+
+            except Exception as e:
+                st.error(f"Error fitting OLS model: {e}")
+                import traceback
+
+                st.text(traceback.format_exc())
+
+    if st.button("ARIMA Price Forecast", use_container_width=True):
+        st.session_state.selected_model = 'ARIMA'
+        with st.spinner("Training ARIMA Model (rolling forecasts)..."):
+            try:
+                # Run complete ARIMA pipeline: returns forecast → price conversion
+                results = run_arima_price_forecast(
+                    train_returns=data['train_returns'],
+                    test_returns=data['test_returns'],
+                    train_prices=data['train_prices'],
+                    ticker=data['ticker']
+                )
+
+                st.success(f"ARIMA{results['order']} trained successfully!")
+
+                # Model Info
+                st.write("### Model Information")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Order (p,d,q)", str(results['order']))
+                col2.metric("Training Samples", len(data['train_returns']))
+                col3.metric("Test Samples", len(data['test_returns']))
+
+                # Return-level metrics
+                st.write("### Return Forecast Evaluation")
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric(
+                    "Return MAE",
+                    f"{results['return_mae']:.6f}",
+                    help="Mean Absolute Error in return units"
+                )
+                col2.metric(
+                    "Return RMSE",
+                    f"{results['return_rmse']:.6f}",
+                    help="Root Mean Squared Error in return units"
+                )
+                col3.metric(
+                    "Direction Accuracy",
+                    f"{results['direction_accuracy']:.1f}%",
+                    help="% of times we correctly predicted price direction"
+                )
+                col4.metric(
+                    "Baseline",
+                    "50%",
+                    help="Random guess accuracy for direction"
+                )
+
+                # Price-level metrics
+                st.write("### Price Forecast Evaluation")
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric(
+                    "Price MAE",
+                    f"${results['price_mae']:.2f}",
+                    help="Mean Absolute Error in dollar terms"
+                )
+                col2.metric(
+                    "Price RMSE",
+                    f"${results['price_rmse']:.2f}",
+                    help="Root Mean Squared Error in dollar terms"
+                )
+                col3.metric(
+                    "MAPE",
+                    f"{results['mape']:.2f}%",
+                    help="Mean Absolute Percentage Error"
+                )
+                col4.metric(
+                    "Naive MAE",
+                    f"${results['naive_mae']:.2f}",
+                    help="Random walk baseline (predict no change)"
+                )
+
+                # Comparison with naive
+                if results['price_mae'] < results['naive_mae']:
+                    improvement = ((results['naive_mae'] - results['price_mae']) / results['naive_mae'] * 100)
+                    st.success(f"✓ ARIMA beats random walk baseline by {improvement:.1f}%")
+                else:
+                    st.info("ARIMA does not outperform random walk (expected for efficient markets)")
+
+                # Plot 1: Price Forecast vs Actual (ANCHORED - tracks actual prices)
+                st.write(f"### Price Forecast: ARIMA{results['order']}")
+
+                # Toggle between views
+                view_mode = st.radio(
+                    "Forecast View Mode",
+                    ["One-Step Anchored", "Compounded (shows drift)"],
+                    horizontal=True,
+                    help="Anchored: each forecast starts from actual previous price. Compounded: forecasts chain from each other."
+                )
+
+                fig, ax = plt.subplots(figsize=(12, 6))
+
+                # Plot training prices (last portion for context)
+                train_prices_plot = data['train_prices'][data['ticker']].iloc[-60:]
+                ax.plot(train_prices_plot.index, train_prices_plot.values,
+                        color='gray', alpha=0.5, label='Training (last 60 days)')
+
+                # Plot actual test prices
+                ax.plot(results['actual_prices'].index, results['actual_prices'].values,
+                        label='Actual Prices', color='blue', linewidth=1.5)
+
+                if view_mode == "One-Step Anchored":
+                    # Plot anchored forecast prices (tracks actual)
+                    ax.plot(results['forecast_prices'].index, results['forecast_prices'].values,
+                            label='ARIMA Forecast (anchored)', color='red', linewidth=1.5, linestyle='--')
+                    subtitle = "Each forecast anchored to actual previous price"
+                else:
+                    # Plot compounded forecast prices (shows drift)
+                    ax.plot(results['forecast_prices_compounded'].index, results['forecast_prices_compounded'].values,
+                            label='ARIMA Forecast (compounded)', color='red', linewidth=1.5, linestyle='--')
+                    subtitle = f"Forecasts compounded from ${results['last_train_price']:.2f}"
+
+                # Split line
+                split_date = results['actual_prices'].index[0]
+                ax.axvline(x=split_date, color='green', linestyle=':', linewidth=2, label='Forecast Start')
+
+                ax.set_xlabel('Date')
+                ax.set_ylabel('Price ($)')
+                ax.set_title(f'{data["ticker"]} Price Forecast - ARIMA{results["order"]}\n{subtitle}')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+
+                st.pyplot(fig)
+
+                # Show both metrics side by side
+                if view_mode == "Compounded (shows drift)":
+                    st.caption(f"Compounded MAPE: {results['mape_compounded']:.2f}% | "
+                               f"Compounded MAE: ${results['price_mae_compounded']:.2f}")
+
+                # Plot 2: Returns Forecast vs Actual
+                st.write("### Returns Forecast")
+
+                fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+                # Top: Actual vs Forecast returns
+                axes[0].plot(results['actual_returns'].index, results['actual_returns'].values,
+                             label='Actual Returns', color='blue', alpha=0.7)
+                axes[0].plot(results['forecast_returns'].index, results['forecast_returns'].values,
+                             label='ARIMA Forecast', color='red', linewidth=1.5)
+                axes[0].axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+                axes[0].set_ylabel('Daily Returns')
+                axes[0].set_title('Returns: Actual vs Forecast')
+                axes[0].legend()
+                axes[0].grid(True, alpha=0.3)
+
+                # Bottom: Forecast errors
+                errors = results['actual_returns'] - results['forecast_returns']
+                axes[1].bar(errors.index, errors.values, color='purple', alpha=0.6, width=1)
+                axes[1].axhline(y=0, color='black', linewidth=0.5)
+                axes[1].set_xlabel('Date')
+                axes[1].set_ylabel('Forecast Error')
+                axes[1].set_title(f'Forecast Errors (Mean: {errors.mean():.6f}, Std: {errors.std():.6f})')
+                axes[1].grid(True, alpha=0.3)
+
+                plt.tight_layout()
+                st.pyplot(fig)
+
+                # Plot 3: Cumulative returns comparison
+                st.write("### Cumulative Performance")
+
+                fig, ax = plt.subplots(figsize=(12, 5))
+
+                # Model interpretation
+                with st.expander("Model Interpretation"):
+                    st.write("""
+                    **How ARIMA Price Forecasting Works:**
+
+                    1. **Returns Modeling**: ARIMA models the *returns* (percentage changes), not prices directly.
+                       Returns are typically stationary, which ARIMA requires.
+
+                    2. **Rolling Forecast**: At each step, we refit the model with all available data up to that point,
+                       then forecast one step ahead. This is more realistic than multi-step forecasting.
+
+                    3. **Price Conversion**: Forecast returns are converted back to prices using:
+                       `P_t = P_{t-1} × (1 + r_forecast)`
+
+                    **Two Forecast Views:**
+
+                    | View | Formula | Shows |
+                    |------|---------|-------|
+                    | **One-Step Anchored** | P_forecast = P_actual(t-1) × (1 + r_forecast) | How well we predict each day's move |
+                    | **Compounded** | P_forecast = P_forecast(t-1) × (1 + r_forecast) | Cumulative drift / trend capture |
+
+                    The **anchored view** is the fair evaluation - it shows prediction accuracy for each day.
+                    The **compounded view** reveals that ARIMA tends to predict a constant mean return,
+                    resulting in a smooth exponential curve (the "drift" you see).
+
+                    **Key Metrics:**
+                    - **Direction Accuracy > 50%**: Model has some predictive power for price direction
+                    - **MAPE < 5%**: Generally considered good for financial forecasting
+                    - **Beating Random Walk**: Difficult in efficient markets due to EMH
+
+                    **Why ARIMA Shows a Smooth Curve (Compounded View):**
+                    - ARIMA forecasts tend toward the mean return (e.g., +0.1% daily)
+                    - Compounding similar small values creates exponential growth
+                    - This is actually capturing the *drift* correctly, just not the *noise*
+
+                    **Limitations:**
+                    - ARIMA assumes constant variance (homoscedasticity)
+                    - Cannot capture volatility clustering (use GARCH for that)
+                    - Daily return forecasts tend toward the mean, missing day-to-day variation
+                    """)
+
+            except Exception as e:
+                st.error(f"Error training ARIMA model: {e}")
+                import traceback
+
+                st.text(traceback.format_exc())
+
     if st.button("GARCH Volatility Forecast", use_container_width=True):
         st.session_state.selected_model = 'GARCH'
         with st.spinner("Training GARCH Model"):
@@ -181,7 +465,7 @@ if st.session_state.get('stock_data_fetched', False):
 
                 # Display any warnings
                 if garch_result['warnings']:
-                    with st.expander("️Model Warnings", expanded=False):
+                    with st.expander("ï¸Model Warnings", expanded=False):
                         for warning in garch_result['warnings']:
                             st.warning(warning)
 
@@ -204,54 +488,54 @@ if st.session_state.get('stock_data_fetched', False):
 
                 # Omega (always present)
                 param_rows.append({
-                    'Parameter': 'ω (omega)',
+                    'Parameter': 'Ï‰ (omega)',
                     'Description': 'Constant variance term',
                     'Estimate': f"{params['omega']:.6e}",
                     'Std Error': f"{std_err['omega']:.2e}",
                     'P-Value': f"{pvalues['omega']:.4f}" if pvalues['omega'] >= 0.0001 else "<0.0001",
-                    'Significant': "✓" if pvalues['omega'] < 0.05 else ""
+                    'Significant': "âœ“" if pvalues['omega'] < 0.05 else ""
                 })
 
                 # Alpha (always present)
                 param_rows.append({
-                    'Parameter': 'α (alpha)',
+                    'Parameter': 'Î± (alpha)',
                     'Description': 'Shock impact (ARCH term)',
                     'Estimate': f"{params['alpha[1]']:.4f}",
                     'Std Error': f"{std_err['alpha[1]']:.4f}",
                     'P-Value': f"{pvalues['alpha[1]']:.4f}",
-                    'Significant': "✓" if pvalues['alpha[1]'] < 0.05 else ""
+                    'Significant': "âœ“" if pvalues['alpha[1]'] < 0.05 else ""
                 })
 
                 # Gamma (only for GJR-GARCH)
                 if 'gamma[1]' in params:
                     param_rows.append({
-                        'Parameter': 'γ (gamma)',
+                        'Parameter': 'Î³ (gamma)',
                         'Description': 'Asymmetric/leverage effect',
                         'Estimate': f"{params['gamma[1]']:.4f}",
                         'Std Error': f"{std_err['gamma[1]']:.4f}",
                         'P-Value': f"{pvalues['gamma[1]']:.4f}" if pvalues['gamma[1]'] >= 0.0001 else "<0.0001",
-                        'Significant': "✓" if pvalues['gamma[1]'] < 0.05 else ""
+                        'Significant': "âœ“" if pvalues['gamma[1]'] < 0.05 else ""
                     })
 
                 # Beta (always present)
                 param_rows.append({
-                    'Parameter': 'β (beta)',
+                    'Parameter': 'Î² (beta)',
                     'Description': 'Volatility persistence (GARCH term)',
                     'Estimate': f"{params['beta[1]']:.4f}",
                     'Std Error': f"{std_err['beta[1]']:.4f}",
                     'P-Value': f"{pvalues['beta[1]']:.4f}" if pvalues['beta[1]'] >= 0.0001 else "<0.0001",
-                    'Significant': "✓" if pvalues['beta[1]'] < 0.05 else ""
+                    'Significant': "âœ“" if pvalues['beta[1]'] < 0.05 else ""
                 })
 
                 # Nu (only for t-distribution)
                 if 'nu' in params:
                     param_rows.append({
-                        'Parameter': 'ν (nu)',
+                        'Parameter': 'Î½ (nu)',
                         'Description': 'Degrees of freedom (tail thickness)',
                         'Estimate': f"{params['nu']:.2f}",
                         'Std Error': f"{std_err['nu']:.2f}",
                         'P-Value': f"{pvalues['nu']:.4f}" if pvalues['nu'] >= 0.0001 else "<0.0001",
-                        'Significant': "✓" if pvalues['nu'] < 0.05 else ""
+                        'Significant': "âœ“" if pvalues['nu'] < 0.05 else ""
                     })
 
                 param_df = pd.DataFrame(param_rows)
@@ -284,16 +568,16 @@ if st.session_state.get('stock_data_fetched', False):
 
                 if 'gamma[1]' in params:
                     with col2:
-                        st.metric("Leverage Effect (γ)", f"{params['gamma[1]']:.4f}")
+                        st.metric("Leverage Effect (Î³)", f"{params['gamma[1]']:.4f}")
                         if pvalues['gamma[1]'] < 0.05:
-                            st.caption("✓ Significant: negative returns increase volatility more")
+                            st.caption("âœ“ Significant: negative returns increase volatility more")
                         else:
                             st.caption("Not significant: symmetric volatility response")
 
                 if 'nu' in params:
                     target_col = col3 if 'gamma[1]' in params else col2
                     with target_col:
-                        st.metric("Tail Index (ν)", f"{params['nu']:.2f}")
+                        st.metric("Tail Index (Î½)", f"{params['nu']:.2f}")
                         if params['nu'] < 6:
                             st.caption("Very heavy tails: frequent extreme moves")
                         elif params['nu'] < 10:

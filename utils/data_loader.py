@@ -14,6 +14,11 @@ def fetch_process_stock_data(ticker):
     #Set up stock
     stock = yf.Ticker(ticker)
 
+    try:
+        company_name = stock.info.get('longName', ticker)
+    except:
+        company_name = ticker
+
     #Set date range to 5 years before current trading day
     endDate = pd.to_datetime('today')
     startDate = endDate - pd.DateOffset(years=5)
@@ -47,6 +52,7 @@ def fetch_process_stock_data(ticker):
     return {
         'ticker': ticker,
         'raw_data': historical_data,
+        'company_name': company_name,
         'prices': prices,
         'returns': returns,
         'train_prices': train_prices,

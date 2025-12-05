@@ -37,6 +37,7 @@ def train_garch_model(returns, split_index):
         is_valid, validation_warnings = validate_garch_fit(fitted)
         warnings.extend(validation_warnings)
 
+
         if is_valid:
             return {
                 'model': fitted,
