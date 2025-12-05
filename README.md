@@ -40,7 +40,7 @@ This project demonstrates end-to-end data science capabilities in financial anal
 ### Requirements
 
 ```bash
-pip install streamlit yfinance pandas numpy arch matplotlib seaborn
+pip install streamlit yfinance pandas numpy arch matplotlib seaborn statsmodels
 ```
 
 ### Dependencies
@@ -51,6 +51,7 @@ pip install streamlit yfinance pandas numpy arch matplotlib seaborn
 - `numpy`: Numerical computations
 - `arch`: GARCH model implementation
 - `matplotlib` / `seaborn`: Visualization
+- `statsmodels`: Statistical modeling (ARIMA, OLS)
 
 ## Usage
 

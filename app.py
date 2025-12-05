@@ -1,6 +1,7 @@
 import streamlit as st
 from utils.data_loader import fetch_process_stock_data
 from models.garch_model import train_garch_model, get_forecast_volatility
+from models.ols_model import fit_ols_model
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt  # Fixed: was 'matplotlib as plt'
@@ -361,6 +362,85 @@ if st.session_state.get('stock_data_fetched', False):
                 import traceback
 
                 st.text(traceback.format_exc())
+
+
+    # OLS Model Button
+    if st.button("OLS Regression Analyse", use_container_width=True):
+        st.session_state.selected_model = 'OLS Regression'
+        with st.spinner("Fitting OLS Model"):
+            try:
+
+                prices_series = pd.Series(index = data['prices'].index, data = data['prices'][data['ticker']])
+
+                ols_result = fit_ols_model(prices_series)
+                ols_model = ols_result['model']
+
+                st.success(f"OLS model fitted successfully!")
+
+                # Display any warnings
+                if ols_result['warnings']:
+                    with st.expander("️Model Warnings", expanded=False):
+                        for warning in ols_result['warnings']:
+                            st.warning(warning)
+
+                st.write("### Model Summary")
+                summary_str = ols_model.summary().as_text()
+                st.text(summary_str, text_alignment='center',width="stretch")
+
+                st.write("### Model Coefficients")
+                coef_df = pd.DataFrame({
+                    'Coefficient': ols_model.params,
+                    'Std Error': ols_model.bse,
+                    'P-Value': ols_model.pvalues
+                })
+                st.dataframe(coef_df, use_container_width=True, hide_index=False)
+
+                st.write("### Plot Residuals")
+                residuals = ols_model.resid
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.plot(residuals.index, residuals, label='Residuals', color='purple')
+                ax.axhline(0, color='black', linestyle='--', linewidth=1)
+                ax.set_xlabel('Date')
+                ax.set_ylabel('Residuals')
+                ax.set_title('OLS Model Residuals Over Time')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                st.pyplot(fig)
+                # Plot histogram of residuals and normality
+                st.write("### Residuals Distribution")
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.hist(residuals, bins=50, color='teal', alpha=0.7)
+                # normality line
+                mu = residuals.mean()
+                sigma = residuals.std()
+                xmin, xmax = ax.get_xlim()
+                x = np.linspace(xmin, xmax, 100)
+                p = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+                ax.plot(x, p * len(residuals) * (xmax - xmin) / 50, 'r--', linewidth=2, label='Normal Distribution')
+                ax.legend()
+                ax.set_xlabel('Residuals')
+                ax.set_ylabel('Frequency')
+                ax.set_title('Histogram of OLS Model Residuals')
+                st.pyplot(fig)
+                # Scatter plot of residuals vs fitted values
+                st.write("### Residuals vs Fitted Values")
+                fitted_values = ols_model.fittedvalues
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.scatter(fitted_values, residuals, alpha=0.6, color='orange')
+                ax.axhline(0, color='black', linestyle='--', linewidth=1)
+                ax.set_xlabel('Fitted Values')
+                ax.set_ylabel('Residuals')
+                ax.set_title('Residuals vs Fitted Values')
+                st.pyplot(fig)
+
+
+            except Exception as e:
+                st.error(f"Error fitting OLS model: {e}")
+                import traceback
+
+                st.text(traceback.format_exc())
+
+
 
     if 'selected_model' in st.session_state:
         st.write(f"**Currently viewing: {st.session_state.selected_model}**")
