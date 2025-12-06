@@ -5,7 +5,7 @@ from models.arima import run_arima_price_forecast
 from models.ols_model import fit_ols_model
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt  # Fixed: was 'matplotlib as plt'
+import matplotlib.pyplot as plt
 
 st.title('Stock Volatility Dashboard')
 
