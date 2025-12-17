@@ -15,6 +15,7 @@ if 'stock_data_fetched' not in st.session_state:
 
 ticker = st.text_input('Enter stock symbol').upper()
 
+#Fetch data in session state to temporarily store ticker data
 if st.button("Fetch Data"):
     with st.spinner(f'Fetching data for {ticker}'):
         try:
