@@ -15,7 +15,7 @@ if 'stock_data_fetched' not in st.session_state:
 
 ticker = st.text_input('Enter stock symbol').upper()
 
-#Fetch data in session state to temporarily store ticker data
+# Fetch data in session state to temporarily store ticker data
 if st.button("Fetch Data"):
     with st.spinner(f'Fetching data for {ticker}'):
         try:
@@ -180,7 +180,7 @@ if st.session_state.get('stock_data_fetched', False):
 
                 # Display any warnings
                 if ols_result['warnings']:
-                    with st.expander("️Model Warnings", expanded=False):
+                    with st.expander("ï¸Model Warnings", expanded=False):
                         for warning in ols_result['warnings']:
                             st.warning(warning)
 
@@ -245,7 +245,7 @@ if st.session_state.get('stock_data_fetched', False):
         st.session_state.selected_model = 'ARIMA'
         with st.spinner("Training ARIMA Model (rolling forecasts)..."):
             try:
-                # Run complete ARIMA pipeline: returns forecast → price conversion
+                # Run complete ARIMA pipeline: returns forecast â†’ price conversion
                 results = run_arima_price_forecast(
                     train_returns=data['train_returns'],
                     test_returns=data['test_returns'],
@@ -313,20 +313,12 @@ if st.session_state.get('stock_data_fetched', False):
                 # Comparison with naive
                 if results['price_mae'] < results['naive_mae']:
                     improvement = ((results['naive_mae'] - results['price_mae']) / results['naive_mae'] * 100)
-                    st.success(f"✓ ARIMA beats random walk baseline by {improvement:.1f}%")
+                    st.success(f"âœ“ ARIMA beats random walk baseline by {improvement:.1f}%")
                 else:
                     st.info("ARIMA does not outperform random walk (expected for efficient markets)")
 
                 # Plot 1: Price Forecast vs Actual (ANCHORED - tracks actual prices)
                 st.write(f"### Price Forecast: ARIMA{results['order']}")
-
-                # Toggle between views
-                view_mode = st.radio(
-                    "Forecast View Mode",
-                    ["One-Step Anchored", "Compounded (shows drift)"],
-                    horizontal=True,
-                    help="Anchored: each forecast starts from actual previous price. Compounded: forecasts chain from each other."
-                )
 
                 fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -339,16 +331,9 @@ if st.session_state.get('stock_data_fetched', False):
                 ax.plot(results['actual_prices'].index, results['actual_prices'].values,
                         label='Actual Prices', color='blue', linewidth=1.5)
 
-                if view_mode == "One-Step Anchored":
-                    # Plot anchored forecast prices (tracks actual)
-                    ax.plot(results['forecast_prices'].index, results['forecast_prices'].values,
-                            label='ARIMA Forecast (anchored)', color='red', linewidth=1.5, linestyle='--')
-                    subtitle = "Each forecast anchored to actual previous price"
-                else:
-                    # Plot compounded forecast prices (shows drift)
-                    ax.plot(results['forecast_prices_compounded'].index, results['forecast_prices_compounded'].values,
-                            label='ARIMA Forecast (compounded)', color='red', linewidth=1.5, linestyle='--')
-                    subtitle = f"Forecasts compounded from ${results['last_train_price']:.2f}"
+                # Plot anchored forecast prices (tracks actual)
+                ax.plot(results['forecast_prices'].index, results['forecast_prices'].values,
+                        label='ARIMA Forecast', color='red', linewidth=1.5, linestyle='--')
 
                 # Split line
                 split_date = results['actual_prices'].index[0]
@@ -356,16 +341,12 @@ if st.session_state.get('stock_data_fetched', False):
 
                 ax.set_xlabel('Date')
                 ax.set_ylabel('Price ($)')
-                ax.set_title(f'{data["ticker"]} Price Forecast - ARIMA{results["order"]}\n{subtitle}')
+                ax.set_title(
+                    f'{data["ticker"]} Price Forecast - ARIMA{results["order"]}\nOne-Step-Ahead Rolling Forecast')
                 ax.legend()
                 ax.grid(True, alpha=0.3)
 
                 st.pyplot(fig)
-
-                # Show both metrics side by side
-                if view_mode == "Compounded (shows drift)":
-                    st.caption(f"Compounded MAPE: {results['mape_compounded']:.2f}% | "
-                               f"Compounded MAE: ${results['price_mae_compounded']:.2f}")
 
                 # Plot 2: Returns Forecast vs Actual
                 st.write("### Returns Forecast")
@@ -401,7 +382,7 @@ if st.session_state.get('stock_data_fetched', False):
                 fig, ax = plt.subplots(figsize=(12, 5))
 
                 # Model interpretation
-                with st.expander("Model Interpretation"):
+                with st.expander("📊 Model Interpretation & Formulas"):
                     st.write("""
                     **How ARIMA Price Forecasting Works:**
 
@@ -412,34 +393,74 @@ if st.session_state.get('stock_data_fetched', False):
                        then forecast one step ahead. This is more realistic than multi-step forecasting.
 
                     3. **Price Conversion**: Forecast returns are converted back to prices using:
-                       `P_t = P_{t-1} × (1 + r_forecast)`
+                       `P̂_t = P_{t-1} × (1 + r̂_t)` where P_{t-1} is the actual previous price.
 
-                    **Two Forecast Views:**
+                    ---
 
-                    | View | Formula | Shows |
-                    |------|---------|-------|
-                    | **One-Step Anchored** | P_forecast = P_actual(t-1) × (1 + r_forecast) | How well we predict each day's move |
-                    | **Compounded** | P_forecast = P_forecast(t-1) × (1 + r_forecast) | Cumulative drift / trend capture |
+                    **Key Performance Metrics:**
 
-                    The **anchored view** is the fair evaluation - it shows prediction accuracy for each day.
-                    The **compounded view** reveals that ARIMA tends to predict a constant mean return,
-                    resulting in a smooth exponential curve (the "drift" you see).
+                    **1. Direction Accuracy**
 
-                    **Key Metrics:**
-                    - **Direction Accuracy > 50%**: Model has some predictive power for price direction
-                    - **MAPE < 5%**: Generally considered good for financial forecasting
-                    - **Beating Random Walk**: Difficult in efficient markets due to EMH
+                    Measures how often we correctly predict whether the price will go up or down:
 
-                    **Why ARIMA Shows a Smooth Curve (Compounded View):**
-                    - ARIMA forecasts tend toward the mean return (e.g., +0.1% daily)
-                    - Compounding similar small values creates exponential growth
-                    - This is actually capturing the *drift* correctly, just not the *noise*
+                    """)
+                    st.latex(
+                        r"\text{Direction Accuracy} = \frac{1}{n}\sum_{t=1}^{n} \mathbb{1}[\text{sign}(\hat{r}_t) = \text{sign}(r_t)] \times 100\%")
+                    st.write("""
+                    where:
+                    - `sign(r̂_t)` = predicted direction (+1 for up, -1 for down, 0 for no change)
+                    - `sign(r_t)` = actual direction
+                    - `𝟙[condition]` = indicator function (1 if true, 0 if false)
+
+                    **Interpretation**: 
+                    - 50% = Random guessing baseline (coin flip)
+                    - >50% = Model has predictive power for direction
+                    - >55% = Generally considered useful in practice
+
+                    **2. Naive Baseline (Random Walk)**
+
+                    The simplest forecast: "tomorrow's price will equal today's price"
+
+                    """)
+                    st.latex(r"\hat{P}_t^{\text{naive}} = P_{t-1}")
+                    st.write("""
+                    This implies forecasting zero return: `r̂_t = 0`
+
+                    We measure naive performance using MAE:
+                    """)
+                    st.latex(r"\text{Naive MAE} = \frac{1}{n}\sum_{t=1}^{n} |P_t - P_{t-1}|")
+                    st.write("""
+
+                    **Why Compare to Random Walk?**
+                    - In efficient markets (EMH), prices follow a random walk
+                    - Beating this baseline is difficult but meaningful
+                    - If ARIMA beats naive, the model captures genuine patterns
+
+                    ---
+
+                    **Other Metrics:**
+
+                    **Price MAE (Mean Absolute Error)**:
+                    """)
+                    st.latex(r"\text{MAE} = \frac{1}{n}\sum_{t=1}^{n} |P_t - \hat{P}_t|")
+
+                    st.write("""
+                    **MAPE (Mean Absolute Percentage Error)**:
+                    """)
+                    st.latex(
+                        r"\text{MAPE} = \frac{1}{n}\sum_{t=1}^{n} \left|\frac{P_t - \hat{P}_t}{P_t}\right| \times 100\%")
+
+                    st.write("""
+
+                    ---
 
                     **Limitations:**
                     - ARIMA assumes constant variance (homoscedasticity)
                     - Cannot capture volatility clustering (use GARCH for that)
                     - Daily return forecasts tend toward the mean, missing day-to-day variation
+                    - Beating random walk baseline is difficult in efficient markets
                     """)
+
 
             except Exception as e:
                 st.error(f"Error training ARIMA model: {e}")
@@ -466,7 +487,7 @@ if st.session_state.get('stock_data_fetched', False):
 
                 # Display any warnings
                 if garch_result['warnings']:
-                    with st.expander("ï¸Model Warnings", expanded=False):
+                    with st.expander("Ã¯Â¸ÂModel Warnings", expanded=False):
                         for warning in garch_result['warnings']:
                             st.warning(warning)
 
@@ -489,54 +510,54 @@ if st.session_state.get('stock_data_fetched', False):
 
                 # Omega (always present)
                 param_rows.append({
-                    'Parameter': 'Ï‰ (omega)',
+                    'Parameter': 'Ãâ€° (omega)',
                     'Description': 'Constant variance term',
                     'Estimate': f"{params['omega']:.6e}",
                     'Std Error': f"{std_err['omega']:.2e}",
                     'P-Value': f"{pvalues['omega']:.4f}" if pvalues['omega'] >= 0.0001 else "<0.0001",
-                    'Significant': "âœ“" if pvalues['omega'] < 0.05 else ""
+                    'Significant': "Ã¢Å“â€œ" if pvalues['omega'] < 0.05 else ""
                 })
 
                 # Alpha (always present)
                 param_rows.append({
-                    'Parameter': 'Î± (alpha)',
+                    'Parameter': 'ÃŽÂ± (alpha)',
                     'Description': 'Shock impact (ARCH term)',
                     'Estimate': f"{params['alpha[1]']:.4f}",
                     'Std Error': f"{std_err['alpha[1]']:.4f}",
                     'P-Value': f"{pvalues['alpha[1]']:.4f}",
-                    'Significant': "âœ“" if pvalues['alpha[1]'] < 0.05 else ""
+                    'Significant': "Ã¢Å“â€œ" if pvalues['alpha[1]'] < 0.05 else ""
                 })
 
                 # Gamma (only for GJR-GARCH)
                 if 'gamma[1]' in params:
                     param_rows.append({
-                        'Parameter': 'Î³ (gamma)',
+                        'Parameter': 'ÃŽÂ³ (gamma)',
                         'Description': 'Asymmetric/leverage effect',
                         'Estimate': f"{params['gamma[1]']:.4f}",
                         'Std Error': f"{std_err['gamma[1]']:.4f}",
                         'P-Value': f"{pvalues['gamma[1]']:.4f}" if pvalues['gamma[1]'] >= 0.0001 else "<0.0001",
-                        'Significant': "âœ“" if pvalues['gamma[1]'] < 0.05 else ""
+                        'Significant': "Ã¢Å“â€œ" if pvalues['gamma[1]'] < 0.05 else ""
                     })
 
                 # Beta (always present)
                 param_rows.append({
-                    'Parameter': 'Î² (beta)',
+                    'Parameter': 'ÃŽÂ² (beta)',
                     'Description': 'Volatility persistence (GARCH term)',
                     'Estimate': f"{params['beta[1]']:.4f}",
                     'Std Error': f"{std_err['beta[1]']:.4f}",
                     'P-Value': f"{pvalues['beta[1]']:.4f}" if pvalues['beta[1]'] >= 0.0001 else "<0.0001",
-                    'Significant': "âœ“" if pvalues['beta[1]'] < 0.05 else ""
+                    'Significant': "Ã¢Å“â€œ" if pvalues['beta[1]'] < 0.05 else ""
                 })
 
                 # Nu (only for t-distribution)
                 if 'nu' in params:
                     param_rows.append({
-                        'Parameter': 'Î½ (nu)',
+                        'Parameter': 'ÃŽÂ½ (nu)',
                         'Description': 'Degrees of freedom (tail thickness)',
                         'Estimate': f"{params['nu']:.2f}",
                         'Std Error': f"{std_err['nu']:.2f}",
                         'P-Value': f"{pvalues['nu']:.4f}" if pvalues['nu'] >= 0.0001 else "<0.0001",
-                        'Significant': "âœ“" if pvalues['nu'] < 0.05 else ""
+                        'Significant': "Ã¢Å“â€œ" if pvalues['nu'] < 0.05 else ""
                     })
 
                 param_df = pd.DataFrame(param_rows)
@@ -569,16 +590,16 @@ if st.session_state.get('stock_data_fetched', False):
 
                 if 'gamma[1]' in params:
                     with col2:
-                        st.metric("Leverage Effect (Î³)", f"{params['gamma[1]']:.4f}")
+                        st.metric("Leverage Effect (ÃŽÂ³)", f"{params['gamma[1]']:.4f}")
                         if pvalues['gamma[1]'] < 0.05:
-                            st.caption("âœ“ Significant: negative returns increase volatility more")
+                            st.caption("Ã¢Å“â€œ Significant: negative returns increase volatility more")
                         else:
                             st.caption("Not significant: symmetric volatility response")
 
                 if 'nu' in params:
                     target_col = col3 if 'gamma[1]' in params else col2
                     with target_col:
-                        st.metric("Tail Index (Î½)", f"{params['nu']:.2f}")
+                        st.metric("Tail Index (ÃŽÂ½)", f"{params['nu']:.2f}")
                         if params['nu'] < 6:
                             st.caption("Very heavy tails: frequent extreme moves")
                         elif params['nu'] < 10:
