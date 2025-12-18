@@ -13,7 +13,7 @@ st.title('Stock Volatility Dashboard')
 if 'stock_data_fetched' not in st.session_state:
     st.session_state.stock_data_fetched = False
 
-ticker = st.text_input('Enter stock symbol').upper()
+ticker = st.text_input('Enter stock symbol').upper().strip()
 
 # Fetch data in session state to temporarily store ticker data
 if st.button("Fetch Data"):
@@ -380,87 +380,6 @@ if st.session_state.get('stock_data_fetched', False):
                 st.write("### Cumulative Performance")
 
                 fig, ax = plt.subplots(figsize=(12, 5))
-
-                # Model interpretation
-                with st.expander("📊 Model Interpretation & Formulas"):
-                    st.write("""
-                    **How ARIMA Price Forecasting Works:**
-
-                    1. **Returns Modeling**: ARIMA models the *returns* (percentage changes), not prices directly.
-                       Returns are typically stationary, which ARIMA requires.
-
-                    2. **Rolling Forecast**: At each step, we refit the model with all available data up to that point,
-                       then forecast one step ahead. This is more realistic than multi-step forecasting.
-
-                    3. **Price Conversion**: Forecast returns are converted back to prices using:
-                       `P̂_t = P_{t-1} × (1 + r̂_t)` where P_{t-1} is the actual previous price.
-
-                    ---
-
-                    **Key Performance Metrics:**
-
-                    **1. Direction Accuracy**
-
-                    Measures how often we correctly predict whether the price will go up or down:
-
-                    """)
-                    st.latex(
-                        r"\text{Direction Accuracy} = \frac{1}{n}\sum_{t=1}^{n} \mathbb{1}[\text{sign}(\hat{r}_t) = \text{sign}(r_t)] \times 100\%")
-                    st.write("""
-                    where:
-                    - `sign(r̂_t)` = predicted direction (+1 for up, -1 for down, 0 for no change)
-                    - `sign(r_t)` = actual direction
-                    - `𝟙[condition]` = indicator function (1 if true, 0 if false)
-
-                    **Interpretation**: 
-                    - 50% = Random guessing baseline (coin flip)
-                    - >50% = Model has predictive power for direction
-                    - >55% = Generally considered useful in practice
-
-                    **2. Naive Baseline (Random Walk)**
-
-                    The simplest forecast: "tomorrow's price will equal today's price"
-
-                    """)
-                    st.latex(r"\hat{P}_t^{\text{naive}} = P_{t-1}")
-                    st.write("""
-                    This implies forecasting zero return: `r̂_t = 0`
-
-                    We measure naive performance using MAE:
-                    """)
-                    st.latex(r"\text{Naive MAE} = \frac{1}{n}\sum_{t=1}^{n} |P_t - P_{t-1}|")
-                    st.write("""
-
-                    **Why Compare to Random Walk?**
-                    - In efficient markets (EMH), prices follow a random walk
-                    - Beating this baseline is difficult but meaningful
-                    - If ARIMA beats naive, the model captures genuine patterns
-
-                    ---
-
-                    **Other Metrics:**
-
-                    **Price MAE (Mean Absolute Error)**:
-                    """)
-                    st.latex(r"\text{MAE} = \frac{1}{n}\sum_{t=1}^{n} |P_t - \hat{P}_t|")
-
-                    st.write("""
-                    **MAPE (Mean Absolute Percentage Error)**:
-                    """)
-                    st.latex(
-                        r"\text{MAPE} = \frac{1}{n}\sum_{t=1}^{n} \left|\frac{P_t - \hat{P}_t}{P_t}\right| \times 100\%")
-
-                    st.write("""
-
-                    ---
-
-                    **Limitations:**
-                    - ARIMA assumes constant variance (homoscedasticity)
-                    - Cannot capture volatility clustering (use GARCH for that)
-                    - Daily return forecasts tend toward the mean, missing day-to-day variation
-                    - Beating random walk baseline is difficult in efficient markets
-                    """)
-
 
             except Exception as e:
                 st.error(f"Error training ARIMA model: {e}")
